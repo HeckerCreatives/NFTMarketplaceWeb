@@ -12,13 +12,12 @@ export const getMyInventory = async (): Promise<MyInventoryResponse> => {
 };
 
 
-export const useGetMyInventory = () => {
+export const useGetMyInventory = (enabled: boolean = true) => {
   return useQuery({
     queryKey: ["myinventory"],
     queryFn: () => getMyInventory(),
     retry: false,
-
-    
+    enabled,
   });
 };
 

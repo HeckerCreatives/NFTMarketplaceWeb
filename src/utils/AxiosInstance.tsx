@@ -33,11 +33,11 @@ axiosInstance.interceptors.response.use(
             showToastOnce(data?.message || "Session expired. Please log in again.");
             localStorage.removeItem("auth");
 
-            if (typeof window !== "undefined") {
-              setTimeout(() => {
-                window.location.href = "/";
-              }, 5000);
-            }
+            // if (typeof window !== "undefined") {
+            //   setTimeout(() => {
+            //     window.location.href = "/";
+            //   }, 5000);
+            // }
 
             setTimeout(() => {
               isRedirecting = false;

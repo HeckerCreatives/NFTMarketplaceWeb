@@ -6,6 +6,8 @@ import { WagmiProvider } from 'wagmi';
 import { config } from '@/wagmi/config';
 import { Toaster } from "react-hot-toast";
 import { Check, X } from "lucide-react";
+import AuthSync from '@/components/auth/AuthSync';
+import { WalletAuthProvider } from '@/contexts/WalletAuthContext';
 
 export default function ClientProviders({ children }: { children: ReactNode }) {
   const [queryClient] = useState(() => new QueryClient());
@@ -13,7 +15,10 @@ export default function ClientProviders({ children }: { children: ReactNode }) {
   return (
     <WagmiProvider config={config}>
       <QueryClientProvider client={queryClient}>
-        {children}
+        <WalletAuthProvider>
+          <AuthSync />
+          {children}
+        </WalletAuthProvider>
         <Toaster
           position="top-right"
           reverseOrder={false}

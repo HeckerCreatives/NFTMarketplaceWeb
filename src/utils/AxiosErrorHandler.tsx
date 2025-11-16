@@ -1,34 +1,37 @@
-import axios, { AxiosError } from "axios";
+import axios from "axios";
 import toast from "react-hot-toast";
 
 export const handleApiError = (error: unknown) => {
+  if (!axios.isAxiosError(error) || !error.response) {
+    toast.error("Network error. Please check your connection.");
+    return;
+  }
 
-    if (axios.isAxiosError(error) && error.response) {
-        const { status, data: errorData } = error.response;
+  const { status, data: errorData } = error.response;
+  const message = (errorData && (errorData.message || errorData.data)) || 'An error occurred';
 
-        if (status === 400) {
-          toast.error(errorData?.data);
-        } 
-
-        if (status === 401) {
-          toast.error(errorData?.data);
-        } 
-
-        if (status === 402) {
-          toast.error(errorData?.data);
-        } 
-        if (status === 403) {
-          toast.error(errorData?.data);
-        } 
-         if (status === 404) {
-          toast.error(errorData?.data);
-        } 
-        if (status === 404) {
-          toast.error(errorData?.data);
-        } 
-
-        if (status === 500) {
-          toast.error(errorData?.data || "Internal server error");
-        } 
-    } 
+  switch (status) {
+    case 400:
+      toast.error(message);
+      break;
+    case 401:
+      // Let AxiosInstance handle redirect/cleanup; show a concise message
+      toast.error(message || 'Unauthorized. Please log in.');
+      break;
+    case 402:
+      toast.error(message || 'Payment required');
+      break;
+    case 403:
+      toast.error(message || 'Forbidden');
+      break;
+    case 404:
+      toast.error(message || 'Not found');
+      break;
+    case 500:
+      toast.error(message || 'Internal server error');
+      break;
+    default:
+      toast.error(message);
+      break;
+  }
 };
