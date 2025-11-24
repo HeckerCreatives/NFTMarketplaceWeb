@@ -7,6 +7,10 @@ export var btmarket = "0xe847fe7FdEb7F9f2c9E368D18C233355ecaD2A2C";
 export var btresell = "0xC16b666B43078CCe3bb632e8e3c24496e7851a46";
 export var btnftcol = "0x0a3Fcd7323D95eaA601352504340DA780dbB786B"
 
+// ETH SEPOLIA TESTNET
+export var sepnft = "0x79253C5A66795Ae0946B4c98EE4bA893A4EEd636";
+export var sepmarket = "0xF4C52F7483E4eD051bE1e4Fe0aBB5714C7E95a95";
+
 
 // Pinata Configuration
 export const pinata = new PinataSDK({
@@ -32,8 +36,7 @@ export const uploadFileToPinata = async (file) => {
     });
     formData.append("pinataMetadata", metadata);
   
-    console.log("Using JWT:", process.env.NEXT_PUBLIC_PINATA_JWT);
-  
+    
     try {
       const response = await fetch(url, {
         method: "POST",

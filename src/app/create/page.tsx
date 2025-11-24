@@ -14,6 +14,8 @@ import { Card } from '@/components/ui/card';
 import { BrowserProvider, Contract, Interface, parseUnits } from 'ethers';
 import NFT from '../../contracts/nft.json';
 import Market from '../../contracts/market.json';
+import Collection from '../../contracts/collection.json';
+import Resell from '../../contracts/resell.json';
 import Web3Modal from "web3modal";
 import { WalletLogin } from '@/components/auth/WalletLogin';
 
@@ -178,6 +180,30 @@ export default function CreateNFT() {
     const formatAddress = (address: string) => {
         return address ? `${address.slice(0, 6)}...${address.slice(-4)}` : ''
     }
+
+
+    async function listContractFunctions(abiOrJson: any) {
+    // abiOrJson can be the imported JSON (NFT / Market) or an ABI array
+    const abi = abiOrJson?.abi ?? abiOrJson;
+    const iface = new Interface(abi);
+
+    const funcs = iface.fragments
+        .filter((f: any) => f.type === 'function')
+        .map((f: any) => ({
+            name: f.name,
+            signature: f.format(), // full signature
+            inputs: f.inputs?.map((i: any) => `${i.type} ${i.name}`).join(', '),
+            stateMutability: f.stateMutability
+        }));
+
+    console.table(funcs);
+    return funcs;
+}
+
+
+// console.log(listContractFunctions(NFT));
+// console.log(listContractFunctions(Market));
+console.log(listContractFunctions(Collection))
 
     return (
         <main className=" w-full bg-zinc-950 min-h-screen h-auto flex flex-col items-center">

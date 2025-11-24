@@ -9,10 +9,11 @@ import { WalletLogin } from '@/components/auth/WalletLogin';
 import { useWalletAuth } from '@/contexts/WalletAuthContext';
 import NFT from '../../../contracts/nft.json';
 import Collection from '../../../contracts/collection.json';
-import { btnft, btnftcol } from '@/contracts/configuration';
+import { btnft, btnftcol, sepmarket, sepnft } from '@/contracts/configuration';
 import { useGetMyInventory } from '@/api/inventory/get';
 import { InventoryItem } from '@/types/inventory';
 import ItemMintDialog from './ItemMintDialog';
+import ItemListDialog from './ItemListDialog';
 
 interface NFTMetadata {
   name: string;
@@ -21,13 +22,14 @@ interface NFTMetadata {
   wallet: string;
   desc: string;
   price?: string;
+  inventoryId?: string;
 }
 
 export default function InventoryContracts() {
   const { address, isConnected } = useAccount();
   const { walletLoggedIn } = useWalletAuth();
   const [nfts, setNfts] = useState<NFTMetadata[]>([]);
-  const [nftSale, setNftsSale] = useState<NFTMetadata[]>([]);
+  // const [nftSale, setNftsSale] = useState<NFTMetadata[]>([]);
   const [inventoryTokenMap, setInventoryTokenMap] = useState<Record<string, number>>({});
 
   // Only enable API queries when wallet is connected and backend wallet-login completed
@@ -84,6 +86,7 @@ export default function InventoryContracts() {
               tokenId: i,
               wallet: owner,
               desc: matchedInventoryId ? (apiInventory.find((a: any) => String(a._id ?? a.id) === matchedInventoryId)?.itemname ?? metadata.description) : metadata.description,
+              inventoryId: matchedInventoryId || undefined,
             };
 
             itemArray.push(meta);
@@ -103,59 +106,59 @@ export default function InventoryContracts() {
     } catch (err) {
       console.error('getCreatedNFTs error', err);
     }
-  }   312312312312312312312312312312312
+  }   
 
-  async function getWalletNFTs() {
-    try {
-      let provider: any;
-      if ((window as any).ethereum) {
-        provider = new BrowserProvider((window as any).ethereum);
-      } else {
-        const web3Modal = new Web3Modal();
-        const connection = await web3Modal.connect();
-        provider = new BrowserProvider(connection);
-      }
+  // async function getWalletNFTs() {
+  //   try {
+  //     let provider: any;
+  //     if ((window as any).ethereum) {
+  //       provider = new BrowserProvider((window as any).ethereum);
+  //     } else {
+  //       const web3Modal = new Web3Modal();
+  //       const connection = await web3Modal.connect();
+  //       provider = new BrowserProvider(connection);
+  //     }
 
-      if (!address) return;
+  //     if (!address) return;
 
-      const signer = await provider.getSigner();
-      const contract = new Contract(btnftcol, Collection, signer);
+  //     const signer = await provider.getSigner();
+  //     const contract = new Contract(btnftcol, Collection, signer);
 
-      const itemArray: NFTMetadata[] = [];
-      const totalSupply = await contract.totalSupply();
+  //     const itemArray: NFTMetadata[] = [];
+  //     const totalSupply = await contract.totalSupply();
 
-      for (let i = 1; i <= totalSupply; i++) {
-        try {
-          const owner = await contract.ownerOf(i);
-          if (owner.toLowerCase() === address.toLowerCase()) {
-            const rawUri = await contract.tokenURI(i);
-            const cleanUri = rawUri.replace('ipfs://', 'https://gateway.pinata.cloud/ipfs/');
-            const response = await axios.get(cleanUri);
-            const metadata = response.data;
-            const rawImg = metadata.image || '';
-            const image = rawImg.replace('ipfs://', 'https://gateway.pinata.cloud/ipfs/');
+  //     for (let i = 1; i <= totalSupply; i++) {
+  //       try {
+  //         const owner = await contract.ownerOf(i);
+  //         if (owner.toLowerCase() === address.toLowerCase()) {
+  //           const rawUri = await contract.tokenURI(i);
+  //           const cleanUri = rawUri.replace('ipfs://', 'https://gateway.pinata.cloud/ipfs/');
+  //           const response = await axios.get(cleanUri);
+  //           const metadata = response.data;
+  //           const rawImg = metadata.image || '';
+  //           const image = rawImg.replace('ipfs://', 'https://gateway.pinata.cloud/ipfs/');
 
-            const meta = {
-              name: metadata.name,
-              img: image,
-              tokenId: i,
-              wallet: owner,
-              desc: metadata.description,
-            };
+  //           const meta = {
+  //             name: metadata.name,
+  //             img: image,
+  //             tokenId: i,
+  //             wallet: owner,
+  //             desc: metadata.description,
+  //           };
 
-            itemArray.push(meta);
-          }
-        } catch (error) {
-          console.log(`Error fetching token ${i}:`, error);
-        }
-      }
+  //           itemArray.push(meta);
+  //         }
+  //       } catch (error) {
+  //         console.log(`Error fetching token ${i}:`, error);
+  //       }
+  //     }
 
-      setNftsSale(itemArray);
-      console.log('Wallet NFTs:', itemArray);
-    } catch (err) {
-      console.error('getWalletNFTs error', err);
-    }
-  }
+  //     setNftsSale(itemArray);
+  //     console.log('Wallet NFTs:', itemArray);
+  //   } catch (err) {
+  //     console.error('getWalletNFTs error', err);
+  //   }
+  // }
 
   useEffect(() => {
     // Only fetch contract data after the wallet is connected AND the backend
@@ -164,7 +167,7 @@ export default function InventoryContracts() {
       // Add a small delay to ensure localStorage flag is fully synced before fetching
       const timer = setTimeout(() => {
         getCreatedNFTs();
-        getWalletNFTs();
+        // getWalletNFTs();
       }, 5000);
       return () => clearTimeout(timer);
     }
@@ -196,7 +199,7 @@ export default function InventoryContracts() {
         <section className="w-full max-w-[1440px] mt-8">
           <div className="w-full flex flex-col items-center gap-6">
             <h3 className="text-2xl font-bold text-white">Your NFTs (from contracts)</h3>
-            <p className="text-sm text-zinc-400">Fetched {nfts.length} created NFTs, {nftSale.length} collection NFTs. Check console for full arrays.</p>
+            {/* <p className="text-sm text-zinc-400">Fetched {nfts.length} created NFTs, {nftSale.length} collection NFTs. Check console for full arrays.</p> */}
 
             {/* Minimal display for created NFTs */}
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 w-full px-4">
@@ -210,9 +213,20 @@ export default function InventoryContracts() {
                       <div className="w-full h-full bg-zinc-700" />
                     )}
                   </div>
-                  <div className="px-3 py-2 text-white border-t border-zinc-800">
-                    <p className="text-sm font-medium mb-1">{nft.name || 'Untitled'}</p>
-                    <p className="text-xs text-zinc-400 truncate">Token: {nft.tokenId}</p>
+                  <div className="px-3 py-2 text-white border-t border-zinc-800 space-y-2">
+                    <div>
+                      <p className="text-sm font-medium mb-1">{nft.name || 'Untitled'}</p>
+                      <p className="text-xs text-zinc-400 truncate">Token: {nft.tokenId}</p>
+                    </div>
+                    <ItemListDialog
+                      tokenId={nft.tokenId}
+                      nftName={nft.name || 'Untitled'}
+                      nftImage={nft.img}
+                      inventoryId={nft.inventoryId}
+                      onListingComplete={() => {
+                        getCreatedNFTs();
+                      }}
+                    />
                   </div>
                 </div>
               ))}
