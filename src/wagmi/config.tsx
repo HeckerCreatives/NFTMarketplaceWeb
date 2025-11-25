@@ -7,14 +7,14 @@ const projectId = '5a745229b3242fa8ed61865f6119416c'
 export const config = createConfig({
   chains: [
     // mainnet, 
-    sepolia, 
+    // sepolia, 
     // polygon, arbitrum, saigon, base, optimism, 
     bscTestnet],
   connectors: [metaMask()],
   transports: {
     [bscTestnet.id]: http(),
     // [mainnet.id]: http(),
-    [sepolia.id]: http(),
+    // [sepolia.id]: http(),
     // [polygon.id]: http(),
     // [arbitrum.id]: http(),
     // [saigon.id]: http(),
