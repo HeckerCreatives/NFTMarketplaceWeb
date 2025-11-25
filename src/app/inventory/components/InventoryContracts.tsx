@@ -7,6 +7,7 @@ import axios from 'axios';
 import { useAccount } from 'wagmi';
 import { WalletLogin } from '@/components/auth/WalletLogin';
 import { useWalletAuth } from '@/contexts/WalletAuthContext';
+import { ChevronDown } from 'lucide-react';
 import NFT from '../../../contracts/nft.json';
 import Collection from '../../../contracts/collection.json';
 import { btnft, btnftcol, sepmarket, sepnft } from '@/contracts/configuration';
@@ -14,6 +15,7 @@ import { useGetMyInventory } from '@/api/inventory/get';
 import { InventoryItem } from '@/types/inventory';
 import ItemMintDialog from './ItemMintDialog';
 import ItemListDialog from './ItemListDialog';
+import { ItemTransferDialog } from './ItemTransferDialog';
 
 interface NFTMetadata {
   name: string;
@@ -29,14 +31,56 @@ export default function InventoryContracts() {
   const { address, isConnected } = useAccount();
   const { walletLoggedIn } = useWalletAuth();
   const [nfts, setNfts] = useState<NFTMetadata[]>([]);
-  // const [nftSale, setNftsSale] = useState<NFTMetadata[]>([]);
   const [inventoryTokenMap, setInventoryTokenMap] = useState<Record<string, number>>({});
+  const [selectedInGame, setSelectedInGame] = useState<Set<string>>(new Set());
+  const [selectedWallet, setSelectedWallet] = useState<Set<number>>(new Set());
 
   // Only enable API queries when wallet is connected and backend wallet-login completed
   const { data: apiData, isLoading: apiLoading, isError: apiError } = useGetMyInventory(
     Boolean(isConnected && walletLoggedIn)
   );
-  const [mintingMap, setMintingMap] = useState<Record<string, boolean>>({});
+
+  const inGameItems = apiData?.data?.inventory?.filter((item: InventoryItem) => item.isMintable && !item.isMinted) ?? [];
+
+  const toggleItemSelect = (id: string | number, type: "ingame" | "wallet") => {
+    if (type === "ingame") {
+      setSelectedInGame((prev) => {
+        const newSet = new Set(prev);
+        if (newSet.has(id as string)) {
+          newSet.delete(id as string);
+        } else {
+          newSet.add(id as string);
+        }
+        return newSet;
+      });
+    } else {
+      setSelectedWallet((prev) => {
+        const newSet = new Set(prev);
+        if (newSet.has(id as number)) {
+          newSet.delete(id as number);
+        } else {
+          newSet.add(id as number);
+        }
+        return newSet;
+      });
+    }
+  };
+
+  const toggleSelectAll = (type: "ingame" | "wallet", items: any[]) => {
+    if (type === "ingame") {
+      if (selectedInGame.size === items.length) {
+        setSelectedInGame(new Set());
+      } else {
+        setSelectedInGame(new Set(items.map((item: InventoryItem) => item._id)));
+      }
+    } else {
+      if (selectedWallet.size === items.length) {
+        setSelectedWallet(new Set());
+      } else {
+        setSelectedWallet(new Set(items.map((nft: NFTMetadata) => nft.tokenId)));
+      }
+    }
+  };
 
   async function getCreatedNFTs() {
     try {
@@ -184,108 +228,185 @@ export default function InventoryContracts() {
   // Minting is now handled by ItemMintDialog (backend + on-chain fallback)
 
   return (
-    <>
-      {!isConnected ? (
-        <section className="w-full max-w-[1440px] mt-8">
-          <div className="w-full flex flex-col items-center gap-6">
-            <h3 className="text-2xl font-bold text-white">Please connect your wallet</h3>
-            <p className="text-sm text-zinc-400">You must be logged in with your wallet to view and mint items.</p>
-            <div className="mt-4">
-              <WalletLogin />
-            </div>
+    <div className="min-h-screen bg-slate-950 p-6">
+      <div className="max-w-[1600px] mx-auto">
+        {!isConnected ? (
+          <div className="flex flex-col items-center justify-center py-20">
+            <h3 className="text-2xl font-bold text-white mb-4">Please connect your wallet</h3>
+            <p className="text-sm text-slate-400 mb-6">You must be logged in with your wallet to view and mint items.</p>
+            <WalletLogin />
           </div>
-        </section>
-      ) : (
-        <section className="w-full max-w-[1440px] mt-8">
-          <div className="w-full flex flex-col items-center gap-6">
-            <h3 className="text-2xl font-bold text-white">Your NFTs (from contracts)</h3>
-            {/* <p className="text-sm text-zinc-400">Fetched {nfts.length} created NFTs, {nftSale.length} collection NFTs. Check console for full arrays.</p> */}
-
-            {/* Minimal display for created NFTs */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 w-full px-4">
-              {nfts.map((nft, index) => (
-                <div key={`created-${index}`} className="group bg-zinc-900 border-[1px] border-zinc-800 rounded-md overflow-hidden">
-                  <div className="w-full h-[280px] bg-zinc-800 overflow-hidden">
-                    {nft.img ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={nft.img} alt={nft.name} className="w-full h-full object-cover" />
-                    ) : (
-                      <div className="w-full h-full bg-zinc-700" />
-                    )}
-                  </div>
-                  <div className="px-3 py-2 text-white border-t border-zinc-800 space-y-2">
-                    <div>
-                      <p className="text-sm font-medium mb-1">{nft.name || 'Untitled'}</p>
-                      <p className="text-xs text-zinc-400 truncate">Token: {nft.tokenId}</p>
-                    </div>
-                    <ItemListDialog
-                      tokenId={nft.tokenId}
-                      nftName={nft.name || 'Untitled'}
-                      nftImage={nft.img}
-                      inventoryId={nft.inventoryId}
-                      onListingComplete={() => {
-                        getCreatedNFTs();
-                      }}
-                    />
-                  </div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 max-w-[1240px]">
+            {/* In-Game Assets Section */}
+            <div className="bg-slate-900/50 rounded-lg p-6 border border-slate-800">
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center gap-2">
+                  <h2 className="text-xl font-bold text-white">In-game Assets</h2>
                 </div>
-              ))}
-            </div>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => {}}
+                    className="text-blue-400 hover:text-blue-300 text-sm font-medium transition"
+                  >
+                    {selectedInGame.size === inGameItems.length && inGameItems.length > 0 ? 'Deselect all' : 'Select all'}
+                  </button>
+                  <button className="text-slate-400 hover:text-slate-300 transition">
+                    <ChevronDown size={20} />
+                  </button>
+                </div>
+              </div>
 
-            {/* API in-game inventory (mintable items) */}
-            <div className="w-full max-w-[1440px] mt-8 px-4">
-              <h4 className="text-lg font-semibold text-white mb-3">In-game Assets</h4>
-              {apiLoading && <p className="text-zinc-400">Loading inventory...</p>}
-              {apiError && <p className="text-red-400">Failed to load in-game inventory</p>}
+              {apiLoading ? (
+                <div className="text-center py-12">
+                  <p className="text-slate-400">Loading inventory...</p>
+                </div>
+              ) : apiError ? (
+                <div className="text-center py-12">
+                  <p className="text-red-400">Failed to load in-game inventory</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                  {inGameItems.length > 0 ? (
+                    inGameItems.map((item: InventoryItem) => (
+                      <div
+                        key={item._id}
+                        className={`relative group cursor-pointer transition-all ${
+                          selectedInGame.has(item._id) ? "ring-2 ring-blue-400" : ""
+                        }`}
+                        onClick={() => toggleItemSelect(item._id, "ingame")}
+                      >
+                        {selectedInGame.has(item._id) && (
+                          <>
+                            <div className="absolute -top-2 -left-2 w-4 h-4 bg-white rounded-full z-10" />
+                            <div className="absolute -top-2 -right-2 w-4 h-4 bg-white rounded-full z-10" />
+                            <div className="absolute -bottom-2 -left-2 w-4 h-4 bg-white rounded-full z-10" />
+                            <div className="absolute -bottom-2 -right-2 w-4 h-4 bg-white rounded-full z-10" />
+                            <div className="absolute top-1/2 -left-2 w-4 h-4 bg-white rounded-full z-10 -translate-y-1/2" />
+                            <div className="absolute top-1/2 -right-2 w-4 h-4 bg-white rounded-full z-10 -translate-y-1/2" />
+                          </>
+                        )}
 
-              {!apiLoading && apiData?.data?.inventory && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                  {apiData.data.inventory.map((item: InventoryItem) => {
-                    const id = item._id;
-                    const isMintable = item.isMintable;
-                    const isMinted = item.isMinted;
-                    const mappedTokenId = inventoryTokenMap?.[String(id)];
-                    return (
-                      <div key={id} className="group bg-zinc-900 border-[1px] border-zinc-800 rounded-md overflow-hidden">
-                        <div className="w-full h-[260px] bg-zinc-800 overflow-hidden">
-                          {item.ipfsImage ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img src={item.ipfsImage} alt={item.itemname} className="w-full h-full object-cover" />
-                          ) : (
-                            <div className="w-full h-full bg-zinc-700" />
-                          )}
-                        </div>
-                        <div className="px-3 py-2 text-white flex flex-col gap-2 border-t border-zinc-800">
-                          <div>
-                            <p className="text-sm font-medium">{item.itemname}</p>
-                            <p className="text-xs text-zinc-400">Qty: {item.quantity}</p>
-                          </div>
-                          <div className="flex items-center gap-2 mt-2">
-                            {isMintable && !isMinted ? (
-                              <ItemMintDialog
-                                item={item}
+                        <div className="bg-slate-800 rounded-lg overflow-hidden border border-slate-700 shadow-lg hover:shadow-xl transition">
+                          <div className="w-full aspect-square bg-slate-700 overflow-hidden flex items-center justify-center">
+                            {item.ipfsImage ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={item.ipfsImage}
+                                alt={item.itemname}
+                                className="w-full h-full object-cover"
                               />
-                            ) : isMinted ? (
-                              mappedTokenId ? (
-                                <span className="text-emerald-400 text-xs font-medium">Minted — Token: {mappedTokenId}</span>
-                              ) : (
-                                <span className="text-emerald-400 text-xs font-medium">Minted</span>
-                              )
                             ) : (
-                              <span className="text-zinc-400 text-xs">Not mintable</span>
+                              <div className="w-full h-full bg-slate-600" />
                             )}
+                          </div>
+                          <div className="p-3 bg-slate-800">
+                            <p className="text-sm font-semibold text-white">{item.itemname}</p>
+                            <p className="text-xs text-slate-400 mt-1">Qty: {item.quantity}</p>
+                            <div className="mt-2" onClick={(e) => e.stopPropagation()}>
+                              <ItemMintDialog item={item} triggerClass="bg-green-600 hover:bg-green-700 text-white text-xs py-1.5 w-full" triggerLabel="Mint" />
+                            </div>
                           </div>
                         </div>
                       </div>
-                    );
-                  })}
+                    ))
+                  ) : (
+                    <div className="col-span-full text-center py-12">
+                      <p className="text-slate-400">No in-game assets available for minting</p>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
 
+            {/* In-Wallet Assets Section */}
+            <div className="bg-slate-900/50 rounded-lg p-6 border border-slate-800">
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center gap-2">
+                  <h2 className="text-xl font-bold text-white">In-wallet Assets</h2>
+                </div>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => {}}
+                    className="text-blue-400 hover:text-blue-300 text-sm font-medium transition"
+                  >
+                    {selectedWallet.size === nfts.length && nfts.length > 0 ? 'Deselect all' : 'Select all'}
+                  </button>
+                  <button className="text-slate-400 hover:text-slate-300 transition">
+                    <ChevronDown size={20} />
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                {nfts.length > 0 ? (
+                  nfts.map((nft, index) => (
+                    <div
+                      key={`wallet-${index}`}
+                      className={`relative group cursor-pointer transition-all ${
+                        selectedWallet.has(nft.tokenId) ? "ring-2 ring-blue-400" : ""
+                      }`}
+                      onClick={() => toggleItemSelect(nft.tokenId, "wallet")}
+                    >
+                      {selectedWallet.has(nft.tokenId) && (
+                        <>
+                          <div className="absolute -top-2 -left-2 w-4 h-4 bg-white rounded-full z-10" />
+                          <div className="absolute -top-2 -right-2 w-4 h-4 bg-white rounded-full z-10" />
+                          <div className="absolute -bottom-2 -left-2 w-4 h-4 bg-white rounded-full z-10" />
+                          <div className="absolute -bottom-2 -right-2 w-4 h-4 bg-white rounded-full z-10" />
+                          <div className="absolute top-1/2 -left-2 w-4 h-4 bg-white rounded-full z-10 -translate-y-1/2" />
+                          <div className="absolute top-1/2 -right-2 w-4 h-4 bg-white rounded-full z-10 -translate-y-1/2" />
+                        </>
+                      )}
+
+                      <div className="bg-slate-800 rounded-lg overflow-hidden border border-slate-700 shadow-lg hover:shadow-xl transition">
+                        <div className="w-full aspect-square bg-slate-700 overflow-hidden flex items-center justify-center">
+                          {nft.img ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={nft.img}
+                              alt={nft.name}
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <div className="w-full h-full bg-slate-600" />
+                          )}
+                        </div>
+                        <div className="p-3">
+                          <p className="text-sm font-semibold text-white">{nft.name || "Untitled"}</p>
+                          <p className="text-xs text-slate-400 mt-1">Token: {nft.tokenId}</p>
+                            <div className="flex mt-2 gap-2 flex-row" onClick={(e) => e.stopPropagation()}>
+                              <ItemListDialog
+                                tokenId={nft.tokenId}
+                                nftName={nft.name || 'Untitled'}
+                                nftImage={nft.img}
+                                inventoryId={nft.inventoryId}
+                                onListingComplete={() => {
+                                  getCreatedNFTs();
+                                }}
+                              />
+                              <ItemTransferDialog
+                                tokenId={nft.tokenId}
+                                nftName={nft.name}
+                                nftImage={nft.img}
+                                inventoryId={nft.inventoryId}
+                                onTransferComplete={() => getCreatedNFTs()}
+                              />
+                            </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="col-span-full text-center py-12">
+                    <p className="text-slate-400">No wallet assets</p>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
-        </section>
-      )}
-    </>
+        )}
+      </div>
+    </div>
   );
 }

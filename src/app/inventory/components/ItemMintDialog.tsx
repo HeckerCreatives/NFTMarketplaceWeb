@@ -167,69 +167,6 @@ export default function ItemMintDialog({ item, triggerClass, triggerLabel = 'Min
       if (metadataUri) payload.metadataUri = metadataUri;
       if (address) payload.targetWallet = address;
 
-      try {
-        const resp = await mintMutation.mutateAsync(payload);
-        console.log('Backend mint response', resp);
-
-        // If backend created inventory documents but left tokenId null, perform on-chain mint for those
-        const mintedItems = resp?.data?.mintedItems ?? resp?.mintedItems ?? resp?.data ?? null;
-        let needsOnChain = 0;
-        let inventoryIdsNeedingOnChain: string[] = [];
-        if (Array.isArray(mintedItems)) {
-          for (const it of mintedItems) {
-            // common shapes: { _id, tokenId } or { id, tokenId }
-            const tokenId = it?.tokenId ?? it?.token_id ?? null;
-            const id = it?._id ?? it?.id ?? null;
-            if ((tokenId === null || tokenId === undefined) && id) {
-              needsOnChain++;
-              inventoryIdsNeedingOnChain.push(String(id));
-            }
-          }
-        }
-
-        if (needsOnChain > 0) {
-          toast('Backend reserved items — now performing on-chain mint (wallet will prompt)...');
-          // perform on-chain mint for number of missing items
-          const receipts = await performOnChainMint(needsOnChain, metadataUri);
-          console.log('On-chain receipts for backend-created items:', receipts);
-
-          // Try to notify backend to attach tokenIds and tx hashes to inventory records
-          try {
-            // Match receipts to inventory IDs in order (best-effort)
-            const tokenIds = receipts.map((r: any) => r.tokenId ?? null);
-            const txHashes = receipts.map((r: any) => r.txHash ?? (r.receipt && r.receipt.transactionHash) ?? null);
-
-            // Notify backend about on-chain token assignments by calling the mint endpoint
-            // Payload shape: { inventoryIds, tokenIds, txHashes, metadataUri }
-            try {
-              const notifyPayload = {
-                inventoryIds: inventoryIdsNeedingOnChain,
-                tokenIds,
-                txHashes,
-                metadataUri: metadataUri,
-              } as any;
-
-              const notifyResp = await mintMutation.mutateAsync(notifyPayload as any);
-              console.log('Backend post-mint response', notifyResp);
-            } catch (notifyErr) {
-              console.warn('Backend post-mint (mint-item) failed', notifyErr);
-            }
-          } catch (confirmErr) {
-            console.warn('Failed to call backend confirm endpoint', confirmErr);
-          }
-
-          toast.success(`On-chain mint complete (${needsOnChain}). Check console for receipts.`);
-        } else {
-          toast.success('Mint successful (backend)');
-        }
-
-        setOpen(false);
-        return;
-      } catch (apiErr) {
-        console.error('Backend mint failed, falling back to on-chain mint', apiErr);
-        // fall through to on-chain fallback
-      }
-
       // Fallback: perform on-chain mint if API did not succeed
       await performOnChainMint(qty, metadataUri);
       setOpen(false);
@@ -261,66 +198,78 @@ export default function ItemMintDialog({ item, triggerClass, triggerLabel = 'Min
         throw new Error('No token URI available to mint from this item');
       }
 
-      // Ensure there's an injected provider (MetaMask). If not present, try to trigger wagmi connect.
-      let provider: any;
-      const injectedAvailable = (typeof window !== 'undefined' && (window as any).ethereum);
-      if (!injectedAvailable) {
-        try {
-          await connect?.({ connector: injected as any });
-        } catch (connErr) {
-          console.warn('wagmi connect request error', connErr);
-        }
-      }
-
+      // Ensure there's an injected provider (MetaMask)
       const injectedNow = (typeof window !== 'undefined' && (window as any).ethereum) ? (window as any).ethereum : null;
       if (!injectedNow) {
         toast.error('No injected wallet found. Please install MetaMask or connect a wallet.');
         throw new Error('No injected provider available');
       }
 
-      // Create an ethers provider from the injected provider and get signer
-      provider = new BrowserProvider(injectedNow as any);
+      // CRITICAL: Request accounts FIRST before any contract calls
+      // This ensures MetaMask opens and user can connect/approve
+      console.log('Requesting accounts from MetaMask...');
       try {
-        await injectedNow.request?.({ method: 'eth_requestAccounts' });
-      } catch (reqErr) {
-        console.warn('eth_requestAccounts request error', reqErr);
+        await injectedNow.request({ method: 'eth_requestAccounts' });
+        console.log('Accounts approved by user');
+      } catch (reqErr: any) {
+        console.warn('User denied account access or request failed', reqErr);
+        if (reqErr?.code === 4001 || reqErr?.message?.includes('User rejected')) {
+          toast.error('Transaction cancelled');
+        } else {
+          toast.error('Failed to connect wallet');
+        }
+        throw reqErr;
       }
 
+      // Create an ethers provider from the injected provider and get signer
+      const provider = new BrowserProvider(injectedNow as any);
       const signer = await provider.getSigner();
       const signerAddress = await signer.getAddress().catch((e: any) => null);
       console.log('Using signer address:', signerAddress);
-      try {
-        const network = await provider.getNetwork();
-        console.log('Provider network:', network);
-      } catch (netErr) {
-        console.warn('Could not read provider network', netErr);
-      }
 
       const contract = new Contract(btnft, NFT, signer as any);
+
+      // Safely read cost() - guard against missing function in ABI
+      let unitCost: any = 0;
+      try {
+        if (typeof (contract as any).cost === 'function') {
+          unitCost = await (contract as any).cost();
+          console.log('Unit cost (wei):', unitCost?.toString ? unitCost.toString() : unitCost);
+        } else {
+          console.warn('contract.cost is not available in ABI - defaulting to 0');
+        }
+      } catch (costErr) {
+        console.warn('Failed to read contract.cost, continuing with cost=0', costErr);
+      }
 
       // Sequentially mint the requested quantity (contract may not support batch mint)
       const receipts: Array<{ txHash: string; receipt: any }> = [];
       for (let i = 0; i < qty; i++) {
         console.log('Minting token', i + 1, 'of', qty, 'tokenUri=', tokenUri);
-        const cost = await contract.cost();
-        console.log('Unit cost (wei):', cost?.toString ? cost.toString() : cost);
 
         try {
           // This call should trigger the wallet signature prompt for a transaction
-          const tx = await contract.mintNFT(tokenUri, { value: cost });
+          const tx = await (contract as any).mintNFT(tokenUri, { value: unitCost });
           console.log('Transaction sent', tx.hash);
+          toast.success(`Transaction sent: ${tx.hash.slice(0, 10)}...`);
+          
           const receipt = await tx.wait();
           console.log('Transaction confirmed', receipt.transactionHash);
+          toast.success(`Minted ${i + 1}/${qty}`);
           receipts.push({ txHash: receipt.transactionHash, receipt });
         } catch (txErr: any) {
           console.error('Transaction error while minting', txErr);
-          // rethrow so caller can handle fallback
+          if (txErr?.code === 4001 || txErr?.message?.includes('User rejected')) {
+            toast.error('Transaction cancelled');
+          } else {
+            toast.error('Mint transaction failed');
+          }
           throw txErr;
         }
       }
 
-      // Optionally refresh or notify — parent onConfirm (if present) would handle updates
       console.log('Minting complete');
+      toast.success('All NFTs minted successfully!');
       return receipts;
     } catch (err) {
       console.error('On-chain mint failed', err);

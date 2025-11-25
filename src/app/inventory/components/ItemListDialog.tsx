@@ -156,7 +156,7 @@ export default function ItemListDialog({
           className="w-full bg-green-600 hover:bg-green-700 text-white text-xs py-1.5"
           disabled={!isConnected}
         >
-          List for Sale
+          List
         </Button>
       </DialogTrigger>
       <DialogContent className="bg-zinc-900 border-zinc-800 text-white max-w-md">

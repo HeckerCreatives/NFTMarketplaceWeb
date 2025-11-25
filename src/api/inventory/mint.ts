@@ -5,8 +5,6 @@ import { handleApiError } from "@/utils/AxiosErrorHandler";
 import { MintItemData } from "@/types/inventory";
 
 
-
-
 export const mintInventory = async (data: MintItemData) => {
   const response = await axiosInstance.post("/inventory/mint-item", data)
   return response.data
