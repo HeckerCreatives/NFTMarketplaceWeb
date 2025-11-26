@@ -34,6 +34,7 @@ export default function InventoryContracts() {
   const [inventoryTokenMap, setInventoryTokenMap] = useState<Record<string, number>>({});
   const [selectedInGame, setSelectedInGame] = useState<Set<string>>(new Set());
   const [selectedWallet, setSelectedWallet] = useState<Set<number>>(new Set());
+  const [totalSupply, setTotalSupply] = useState<number>(0);
 
   // Only enable API queries when wallet is connected and backend wallet-login completed
   const { data: apiData, isLoading: apiLoading, isError: apiError } = useGetMyInventory(
@@ -111,11 +112,13 @@ export default function InventoryContracts() {
         }
       }
       const totalSupply = await contract._tokenIds();
+      setTotalSupply(Number(totalSupply));
       for (let i = 1; i <= totalSupply; i++) {
         try {
           const owner = await contract.ownerOf(i);
           if (owner.toLowerCase() === address.toLowerCase()) {
             const rawUri = await contract.tokenURI(i);
+            console.log('rawUri for token', i, rawUri);
             const cleanUri = rawUri.replace('ipfs://', 'https://gateway.pinata.cloud/ipfs/');
             const response = await axios.get(cleanUri);
             const metadata = response.data;
@@ -218,12 +221,12 @@ export default function InventoryContracts() {
   }, [isConnected, walletLoggedIn, address]);
 
 
-  // When API data arrives, log it and optionally merge with contract-fetched items
-  useEffect(() => {
-    if (apiData && apiData.data) {
-      console.log('API inventory data:', apiData.data);
-    }
-  }, [apiData]);
+  // // When API data arrives, log it and optionally merge with contract-fetched items
+  // useEffect(() => {
+  //   if (apiData && apiData.data) {
+  //     console.log('API inventory data:', apiData.data);
+  //   }
+  // }, [apiData]);
 
   // Minting is now handled by ItemMintDialog (backend + on-chain fallback)
 
@@ -304,7 +307,7 @@ export default function InventoryContracts() {
                             <p className="text-sm font-semibold text-white">{item.itemname}</p>
                             <p className="text-xs text-slate-400 mt-1">Qty: {item.quantity}</p>
                             <div className="mt-2" onClick={(e) => e.stopPropagation()}>
-                              <ItemMintDialog item={item} triggerClass="bg-green-600 hover:bg-green-700 text-white text-xs py-1.5 w-full" triggerLabel="Mint" />
+                              <ItemMintDialog item={item} total={totalSupply} triggerClass="bg-green-600 hover:bg-green-700 text-white text-xs py-1.5 w-full" triggerLabel="Mint" />
                             </div>
                           </div>
                         </div>

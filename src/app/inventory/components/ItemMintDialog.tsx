@@ -15,7 +15,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { BrowserProvider, Contract } from 'ethers';
 import NFT from '../../../contracts/nft.json';
-import { btnft, uploadMetadataToPinata } from '../../../contracts/configuration';
+import { btnft, uploadMetadataToPinata, uploadFileToPinata } from '../../../contracts/configuration';
 import { useMintInventory } from '@/api/inventory/mint';
 import { useAccount, useConnect, injected } from 'wagmi';
 import toast from 'react-hot-toast';
@@ -24,11 +24,12 @@ interface Props {
   item: InventoryItem;
   triggerClass?: string;
   triggerLabel?: string;
+  total: number;
   disabled?: boolean;
   onConfirm?: (quantity: number) => Promise<void> | void;
 }
 
-export default function ItemMintDialog({ item, triggerClass, triggerLabel = 'Mint as NFT', disabled, onConfirm }: Props) {
+export default function ItemMintDialog({ item, triggerClass, triggerLabel = 'Mint as NFT', total, disabled, onConfirm }: Props) {
   const [open, setOpen] = useState(false);
   const [quantity, setQuantity] = useState<number>(1);
   const [busy, setBusy] = useState(false);
@@ -42,6 +43,7 @@ export default function ItemMintDialog({ item, triggerClass, triggerLabel = 'Min
   const { address } = useAccount();
   const { connect } = useConnect();
 
+  console.log(total)
   // Helper: create a metadata JSON and pin to Pinata, returning gateway URI
   async function buildAndUploadMetadata(rawInput?: string): Promise<string | undefined> {
     const rawVal = rawInput ?? (item as any).ipfsImage ?? (item as any).image ?? (item.item && (item.item.ipfsImage ?? item.item.image)) ?? null;
@@ -70,53 +72,87 @@ export default function ItemMintDialog({ item, triggerClass, triggerLabel = 'Min
         }
       }
 
-      // Convert ipfs://... to a properly encoded gateway HTTPS URL for compatibility (MetaMask reliably fetches HTTPS)
-      function ipfsToGatewayUrl(ipfsUri: string) {
-        try {
-          const stripped = ipfsUri.replace(/^ipfs:\/\//, '');
-          const parts = stripped.split('/');
-          const cid = parts.shift();
-          // Decode any existing percent-encoding first (handles %2520) then encode once
-          const decodedSegments = parts.map((p) => {
-            try {
-              return decodeURIComponent(p);
-            } catch (e) {
-              return p;
-            }
-          });
-          const path = decodedSegments.map((p) => encodeURIComponent(p)).join('/');
-          return path && path.length > 0
-            ? `https://gateway.pinata.cloud/ipfs/${cid}/${path}`
-            : `https://gateway.pinata.cloud/ipfs/${cid}`;
-        } catch (e) {
-          return ipfsUri;
+      // IMPORTANT: Re-upload the image file to get a NEW CID for this specific NFT
+      // This ensures each minted NFT has its own unique image reference
+      let newImageCid: string | null = null;
+      try {
+        // Convert to gateway URL for fetching
+        const imageGatewayUrl = imageForJson.replace('ipfs://', 'https://gateway.pinata.cloud/ipfs/');
+        console.log('Fetching image from gateway for re-upload:', imageGatewayUrl);
+        
+        // Fetch the image file
+        const imageResponse = await fetch(imageGatewayUrl);
+        if (!imageResponse.ok) {
+          throw new Error(`Failed to fetch image: ${imageResponse.statusText}`);
         }
+        
+        const imageBlob = await imageResponse.blob();
+        
+        // Use filename based on total supply prop
+        if (total === 0 || total === undefined) {
+          console.warn('Total supply not available, skipping re-upload');
+          throw new Error('Total supply required for filename');
+        }
+        
+        // Determine file extension from blob type
+        let ext = 'png';
+        if (imageBlob.type) {
+          const typeMap: { [key: string]: string } = {
+            'image/png': 'png',
+            'image/jpeg': 'jpg',
+            'image/jpg': 'jpg',
+            'image/gif': 'gif',
+            'image/webp': 'webp',
+          };
+          ext = typeMap[imageBlob.type] || 'png';
+        }
+        
+        const filename = `${total + 1}.${ext}`;
+        
+        // Create a File object from the blob
+        const imageFile = new File([imageBlob], filename, { type: imageBlob.type });
+        
+        console.log('Re-uploading image to Pinata...', filename);
+        const uploadResult = await uploadFileToPinata(imageFile);
+        newImageCid = uploadResult.IpfsHash;
+        console.log('Image re-uploaded with new CID:', newImageCid);
+      } catch (imgErr) {
+        console.warn('Failed to re-upload image, will use original reference:', imgErr);
+        // Fall back to using the original image reference if re-upload fails
       }
 
-      // Prefer to build image from CID + filename when possible so the path exists under the CID
+      // Build the metadata image field using the new CID (or original if re-upload failed)
       let imageForMetadata: string;
-      if (imageForJson && imageForJson.startsWith('ipfs://')) {
+      if (newImageCid) {
+        // Use the new CID with the filename (e.g., ipfs://QmABC.../44.png)
+        const filename = `${total + 1}.${ext}`;
+        imageForMetadata = `ipfs://${newImageCid}/${filename}`;
+      } else if (imageForJson && imageForJson.startsWith('ipfs://')) {
+        // Fall back to normalizing the original ipfs:// URI - use only CID
         const noProto = imageForJson.replace(/^ipfs:\/\//, '');
         const parts = noProto.split('/');
         const cid = parts.shift();
-        const filenameRaw = parts.length > 0 ? parts[parts.length - 1] : undefined;
         if (cid) {
-          if (filenameRaw) {
-            // decode any double-encoding then encode exactly once per segment
-            let decoded = filenameRaw;
-            try { decoded = decodeURIComponent(filenameRaw); } catch (e) { decoded = filenameRaw; }
-            const encoded = encodeURIComponent(decoded);
-            imageForMetadata = `https://gateway.pinata.cloud/ipfs/${cid}/${encoded}`;
-          } else {
-            imageForMetadata = `https://gateway.pinata.cloud/ipfs/${cid}`;
-          }
+          imageForMetadata = `ipfs://${cid}`;
         } else {
-          imageForMetadata = ipfsToGatewayUrl(imageForJson);
+          imageForMetadata = imageForJson;
         }
       } else if (imageForJson && imageForJson.startsWith('http')) {
-        imageForMetadata = imageForJson;
+        // Try to convert HTTP gateway URL back to ipfs:// - use only CID
+        try {
+          const ipfsMatch = imageForJson.match(/\/ipfs\/([^\/]+)/);
+          if (ipfsMatch && ipfsMatch[1]) {
+            const cid = ipfsMatch[1];
+            imageForMetadata = `ipfs://${cid}`;
+          } else {
+            imageForMetadata = imageForJson;
+          }
+        } catch (e) {
+          imageForMetadata = imageForJson;
+        }
       } else {
-        imageForMetadata = ipfsToGatewayUrl(imageForJson);
+        // Last resort
+        imageForMetadata = imageForJson;
       }
 
       const metadata: any = {
