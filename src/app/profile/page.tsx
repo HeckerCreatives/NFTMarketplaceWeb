@@ -24,8 +24,8 @@ import { WalletLogin } from '@/components/auth/WalletLogin';
 
 export default function profile(){
   const { connect } = useConnect()
-  const { address, isConnected } = useAccount();
   const { chains, switchChain } = useSwitchChain()
+  const { address, isConnected } = useAccount();
   const { data: balance } = useBalance({
     address: address,
   });

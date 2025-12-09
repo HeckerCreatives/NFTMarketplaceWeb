@@ -35,6 +35,12 @@ export const uploadFileToPinata = async (file) => {
       },
     });
     formData.append("pinataMetadata", metadata);
+
+    // Force CIDv1 (starts with bafy...) instead of CIDv0 (Qm...)
+    const options = JSON.stringify({
+      cidVersion: 1,
+    });
+    formData.append("pinataOptions", options);
   
     
     try {
@@ -107,7 +113,12 @@ export const uploadFileToPinata = async (file) => {
 export async function uploadMetadataToPinata(metadata) {
   const url = `https://api.pinata.cloud/pinning/pinJSONToIPFS`;
 
-  const response = await axios.post(url, metadata, {
+  const response = await axios.post(url, {
+    pinataContent: metadata,
+    pinataOptions: {
+      cidVersion: 1, // Force CIDv1 (starts with bafy...) instead of CIDv0 (Qm...)
+    },
+  }, {
     headers: {
       Authorization: `Bearer ${process.env.NEXT_PUBLIC_PINATA_JWT}`, // Use your Pinata JWT
       'Content-Type': 'application/json',

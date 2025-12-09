@@ -118,7 +118,6 @@ export default function InventoryContracts() {
           const owner = await contract.ownerOf(i);
           if (owner.toLowerCase() === address.toLowerCase()) {
             const rawUri = await contract.tokenURI(i);
-            console.log('rawUri for token', i, rawUri);
             const cleanUri = rawUri.replace('ipfs://', 'https://gateway.pinata.cloud/ipfs/');
             const response = await axios.get(cleanUri);
             const metadata = response.data;
@@ -149,7 +148,6 @@ export default function InventoryContracts() {
       }
 
       setNfts(itemArray);
-      console.log('Created NFTs:', itemArray);
     } catch (err) {
       console.error('getCreatedNFTs error', err);
     }

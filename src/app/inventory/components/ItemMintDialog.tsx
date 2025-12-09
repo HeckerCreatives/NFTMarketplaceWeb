@@ -43,59 +43,44 @@ export default function ItemMintDialog({ item, triggerClass, triggerLabel = 'Min
   const { address } = useAccount();
   const { connect } = useConnect();
 
-  console.log(total)
-  // Helper: create a metadata JSON and pin to Pinata, returning gateway URI
+
   async function buildAndUploadMetadata(rawInput?: string): Promise<string | undefined> {
     const rawVal = rawInput ?? (item as any).ipfsImage ?? (item as any).image ?? (item.item && (item.item.ipfsImage ?? item.item.image)) ?? null;
     if (!rawVal) return undefined;
     try {
       let imageForJson = String(rawVal).trim();
-
-      // Strip protocol for easier matching
       let stripped = imageForJson.replace(/^https?:\/\//i, '');
 
-      // Handle subdomain gateway forms like <CID>.ipfs.gateway.pinata.cloud/<path>
       const subdomainMatch = stripped.match(/^([a-z0-9]+)\.ipfs\.gateway\.pinata\.cloud\/(.+)$/i);
       if (subdomainMatch) {
         imageForJson = `ipfs://${subdomainMatch[1]}/${subdomainMatch[2]}`;
       } else if (stripped.includes('/ipfs/')) {
-        // gateway path form (gateway.pinata.cloud/ipfs/<CID>/...)
         const parts = stripped.split('/ipfs/');
         if (parts[1]) imageForJson = `ipfs://${parts[1]}`;
       } else if (imageForJson.startsWith('ipfs://')) {
-        // already ipfs://, keep as-is
+        // keep
       } else {
-        // If it looks like just a CID or CID/path, convert to ipfs://<CID> or ipfs://<CID>/file
         const cidOnlyMatch = stripped.match(/^([a-z0-9]+)(\/.*)?$/i);
         if (cidOnlyMatch) {
           imageForJson = `ipfs://${stripped}`;
         }
       }
 
-      // IMPORTANT: Re-upload the image file to get a NEW CID for this specific NFT
-      // This ensures each minted NFT has its own unique image reference
+      // prepare ext in outer scope so it's available later
+      let ext = 'png';
       let newImageCid: string | null = null;
       try {
-        // Convert to gateway URL for fetching
         const imageGatewayUrl = imageForJson.replace('ipfs://', 'https://gateway.pinata.cloud/ipfs/');
         console.log('Fetching image from gateway for re-upload:', imageGatewayUrl);
-        
-        // Fetch the image file
         const imageResponse = await fetch(imageGatewayUrl);
-        if (!imageResponse.ok) {
-          throw new Error(`Failed to fetch image: ${imageResponse.statusText}`);
-        }
-        
+        if (!imageResponse.ok) throw new Error(`Failed to fetch image: ${imageResponse.statusText}`);
         const imageBlob = await imageResponse.blob();
-        
-        // Use filename based on total supply prop
+
         if (total === 0 || total === undefined) {
           console.warn('Total supply not available, skipping re-upload');
           throw new Error('Total supply required for filename');
         }
-        
-        // Determine file extension from blob type
-        let ext = 'png';
+
         if (imageBlob.type) {
           const typeMap: { [key: string]: string } = {
             'image/png': 'png',
@@ -104,41 +89,37 @@ export default function ItemMintDialog({ item, triggerClass, triggerLabel = 'Min
             'image/gif': 'gif',
             'image/webp': 'webp',
           };
-          ext = typeMap[imageBlob.type] || 'png';
+          ext = typeMap[imageBlob.type] || ext;
         }
-        
+
         const filename = `${total + 1}.${ext}`;
-        
-        // Create a File object from the blob
         const imageFile = new File([imageBlob], filename, { type: imageBlob.type });
-        
         console.log('Re-uploading image to Pinata...', filename);
         const uploadResult = await uploadFileToPinata(imageFile);
-        newImageCid = uploadResult.IpfsHash;
+        console.log('uploadFileToPinata returned:', uploadResult);
+        // normalize upload result to a CID string
+        if (uploadResult && typeof uploadResult === 'object' && uploadResult.IpfsHash) {
+          newImageCid = uploadResult.IpfsHash;
+        } else if (typeof uploadResult === 'string') {
+          // some helpers might return the CID or a full gateway URL; extract CID if possible
+          const m = String(uploadResult).match(/(bafy\w+|Qm[1-9A-HJ-NP-Za-km-z]{44,})/);
+          if (m) newImageCid = m[1];
+        }
         console.log('Image re-uploaded with new CID:', newImageCid);
       } catch (imgErr) {
         console.warn('Failed to re-upload image, will use original reference:', imgErr);
-        // Fall back to using the original image reference if re-upload fails
       }
 
-      // Build the metadata image field using the new CID (or original if re-upload failed)
       let imageForMetadata: string;
       if (newImageCid) {
-        // Use the new CID with the filename (e.g., ipfs://QmABC.../44.png)
         const filename = `${total + 1}.${ext}`;
-        imageForMetadata = `ipfs://${newImageCid}/${filename}`;
+        imageForMetadata = `https://gateway.pinata.cloud/ipfs/${newImageCid}`;
       } else if (imageForJson && imageForJson.startsWith('ipfs://')) {
-        // Fall back to normalizing the original ipfs:// URI - use only CID
         const noProto = imageForJson.replace(/^ipfs:\/\//, '');
         const parts = noProto.split('/');
         const cid = parts.shift();
-        if (cid) {
-          imageForMetadata = `ipfs://${cid}`;
-        } else {
-          imageForMetadata = imageForJson;
-        }
+        imageForMetadata = cid ? `ipfs://${cid}` : imageForJson;
       } else if (imageForJson && imageForJson.startsWith('http')) {
-        // Try to convert HTTP gateway URL back to ipfs:// - use only CID
         try {
           const ipfsMatch = imageForJson.match(/\/ipfs\/([^\/]+)/);
           if (ipfsMatch && ipfsMatch[1]) {
@@ -147,32 +128,43 @@ export default function ItemMintDialog({ item, triggerClass, triggerLabel = 'Min
           } else {
             imageForMetadata = imageForJson;
           }
-        } catch (e) {
+        } catch {
           imageForMetadata = imageForJson;
         }
       } else {
-        // Last resort
         imageForMetadata = imageForJson;
       }
 
-      const metadata: any = {
+      const uploadResult = await uploadMetadataToPinata({
         name: (item as any).itemid ?? String((item as any)._id ?? (item as any).id ?? 'Untitled'),
         description: (item as any).itemname ?? '',
         image: imageForMetadata,
-        attributes: [
-          { trait_type: 'InventoryId', value: String((item as any)._id ?? (item as any).id ?? '') },
-        ],
-      };
+        attributes: [{ trait_type: 'InventoryId', value: String((item as any)._id ?? (item as any).id ?? '') }],
+      });
+      console.log('uploadMetadataToPinata returned:', uploadResult);
 
-      const hash = await uploadMetadataToPinata(metadata);
-      // Return gateway URL for ease-of-use in UIs, but metadata.image remains an ipfs:// URI
-      return `https://gateway.pinata.cloud/ipfs/${hash}`;
+      // uploadMetadataToPinata returns just the CID string (not an object)
+      if (uploadResult && typeof uploadResult === 'string') {
+        // CIDv1 uses base32 encoding and can be longer than CIDv0
+        // Match CIDv0 (Qm...) or CIDv1 (bafkrei..., bafybei..., etc.)
+        const cidMatch = uploadResult.match(/^(bafy[a-z2-7]{50,}|bafk[a-z2-7]{50,}|Qm[1-9A-HJ-NP-Za-km-z]{44})$/i);
+        if (cidMatch) {
+          console.log('Metadata CID validated:', cidMatch[1]);
+          // Return public gateway URL pointing to the JSON metadata
+          return `https://gateway.pinata.cloud/ipfs/${cidMatch[1]}`;
+        } else {
+          console.warn('CID validation failed for:', uploadResult);
+        }
+      }
+
+      // fallback: return the original image as gateway url
+      console.warn('Falling back to original image URL');
+      return String(rawVal).replace('ipfs://', 'https://gateway.pinata.cloud/ipfs/');
     } catch (err) {
       console.warn('Failed to pin metadata to Pinata', err);
       return String(rawVal).replace('ipfs://', 'https://gateway.pinata.cloud/ipfs/');
     }
   }
-
   async function handleConfirm() {
     if (disabled) return;
     const qty = Math.max(1, Math.min(max, Math.floor(quantity)));
@@ -202,6 +194,7 @@ export default function ItemMintDialog({ item, triggerClass, triggerLabel = 'Min
       }
       if (metadataUri) payload.metadataUri = metadataUri;
       if (address) payload.targetWallet = address;
+
 
       // Fallback: perform on-chain mint if API did not succeed
       await performOnChainMint(qty, metadataUri);
